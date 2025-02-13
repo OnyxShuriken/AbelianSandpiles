@@ -435,7 +435,7 @@ vector2D generateMobiusCongruenceMap(int size, int total_size) {
 std::mutex fuck;
 
 void toppleWorker(matrixSandpile &sandpile, std::vector<int> &search_range, int &tcount, int &runthru,
-                int width, int height, int search_width, int search_height){
+                int width, int height, int search_width, int search_height, int n){
     int vm, vf;
     for (int vertex : search_range){
         if (sandpile.verticies[vertex] > 3){
@@ -443,19 +443,23 @@ void toppleWorker(matrixSandpile &sandpile, std::vector<int> &search_range, int 
             runthru = 1;
             sandpile.odometer[vertex] += 1;
 
-            vm = vertex % width;
-            vf = vertex / height;
-            // if ((vertex / size == 0) || (vertex / size == size - 1)) {
-            //    sandpile.verticies[vertex] -= 3;
-            //} else {
-            bool locking = (vm == search_width - 2 || vm == search_width - 1 || vm == search_width || vm == search_width + 1 ||
-                            vf == search_height - 2 || vf == search_height - 1 || vf == search_height || vf == search_height + 1);
+            vm = (vertex % width) % (search_width);
+            vf = (vertex / height) % (search_height);
+
+            //TO DO - Change this so that there is a lock for each overlapping axis, not just one for all of them
+            bool locking = (vm == 0 || vm == search_width - 1 || vm == 1 || vm == search_width - 2 ||
+                            vf == 0 || vf == search_height - 1 || vf == 1 || vf == search_height - 2);
             
             if (locking) {
                 fuck.lock();
             }
+
             sandpile.verticies[vertex] -= 4;
+            // if ((vertex / size == 0) || (vertex / size == size - 1)) {
+            //    sandpile.verticies[vertex] -= 3;
+            //} else {
             // };
+
             for (int topples : sandpile.congruence_map[vertex]){
                 //printf("%d, %d\n",topples, vertex);
                 sandpile.verticies[topples] += 1;
@@ -476,8 +480,29 @@ std::vector<int> generateToppleRange(int starting_point, int check_width, int ch
     return range;
 };
 
+vector2D generateGridCover(const int covers, const int width, const int height) {
+    // generates cover^2 non overlapping rectangles
+    vector2D cover;
+    int search_width;
+    int search_height;
+
+    for (int y = 0; y < covers; y++){
+        if (y == covers - 1){ search_height = height - (height / covers * (covers - 1));} else { search_height = height / covers;}
+        for (int x = 0; x < covers; x++){
+            if (x == covers - 1) { search_width = width - (width / covers * (covers - 1));} else { search_width = width / covers;}
+            cover.push_back(generateToppleRange((width * y * (height / covers)) + (x * (width / covers)), search_width, search_height, width));
+        }
+    }
+    
+    return cover;
+};
+
+
 matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width, const int height,
                                         const bool pre_topple, const bool debug = false){
+    
+    
+    const int COVERS = 2;
     int runthru = 1;
     int lcount = 0;
     int tcount = 0;
@@ -496,44 +521,24 @@ matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width
     }
 
     if (debug) {printf("Toppling vertexes...\n");}
-    
-    auto q1 = generateToppleRange(0, width / 2, height / 2, width);
-    auto q2 = generateToppleRange(width / 2, width / 2, height / 2, width);
-    auto q3 = generateToppleRange((height / 2) * width, width / 2, height / 2, width);
-    auto q4 = generateToppleRange((height / 2) * width + width / 2, width / 2, height / 2, width);
 
-    std::thread a1, a2, a3, a4;
+    std::vector<std::thread> threads;
+    vector2D gridCover = generateGridCover(COVERS, width, height);
 
     while (runthru) {
         lcount += 1;
         runthru = 0;
 
-        a1 = std::thread(&toppleWorker, std::ref(sandpile), std::ref(q1), std::ref(tcount), std::ref(runthru), width, height, width / 2, height / 2);
-        a2 = std::thread(&toppleWorker, std::ref(sandpile), std::ref(q2), std::ref(tcount), std::ref(runthru), width, height, width / 2, height / 2);
-        a3 = std::thread(&toppleWorker, std::ref(sandpile), std::ref(q3), std::ref(tcount), std::ref(runthru), width, height, width / 2, height / 2);
-        a4 = std::thread(&toppleWorker, std::ref(sandpile), std::ref(q4), std::ref(tcount), std::ref(runthru), width, height, width / 2, height / 2);
+        for (std::vector<int> &q : gridCover) {
+            threads.push_back(std::thread(  &toppleWorker, std::ref(sandpile), std::ref(q), std::ref(tcount), std::ref(runthru),
+                                            width, height, width / COVERS, height / COVERS, COVERS));
+        }
 
-        a1.join();
-        a2.join();
-        a3.join();
-        a4.join();
+        for (auto&& thread : threads) {
+            thread.join();
+        }
 
-        /* for (int vertex = 0; vertex < total_size; vertex++) {
-            if (sandpile.verticies[vertex] > 3){
-                tcount += 1;
-                runthru = 1;
-                sandpile.odometer[vertex] += 1;
-                // if ((vertex / size == 0) || (vertex / size == size - 1)) {
-                //    sandpile.verticies[vertex] -= 3;
-                //} else {
-                    sandpile.verticies[vertex] -= 4;
-                // };
-                for (int topples : sandpile.congruence_map[vertex]){
-                    //printf("%d, %d\n",topples, vertex);
-                    sandpile.verticies[topples] += 1;
-                };
-            };
-        } */
+        threads.clear();
     }
 
     if (debug) {printf("Done! Sandpile stabalizsed. %d loops perforemd with %d topples.\n", lcount, tcount);}
@@ -701,7 +706,7 @@ void normalGen(const int size){
     auto a = generateSquareCongruenceMap(size, size);
     auto b = generateNeutralElement(a, size, size, false, firstOdo, secondOdo, true);
 
-    createBMP(unflatten(b, size, size), nColourScheme(4), "test.bmp");
+    createBMP(unflatten(b, size, size), nColourScheme(4), "../test.bmp");
 };
 
 void benchmarkTime(int size, int scaling_multiple, int scaling_increase, int start_increase) {
@@ -750,7 +755,11 @@ void plotOdo() {
 int main(){
     srand(time(NULL));
     
-    normalGen(200);
+    auto clock_start = std::chrono::high_resolution_clock::now();
+    normalGen(100);
+    auto clock_stop = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
+    printf("%lld\n", duration.count());
 
     return 0;
 };
