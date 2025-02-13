@@ -432,27 +432,37 @@ vector2D generateMobiusCongruenceMap(int size, int total_size) {
 
 // Big boy stuff
 
-std::mutex fuck;
-
-void toppleWorker(matrixSandpile &sandpile, std::vector<int> &search_range, int &tcount, int &runthru,
-                int width, int height, int search_width, int search_height, int n){
-    int vm, vf;
+void toppleWorker(matrixSandpile &sandpile, const std::vector<int> &search_range, int &tcount, int &runthru,
+                std::vector<std::mutex> &vertical_locks, std::vector<std::mutex> &horizontal_locks,
+                const int width, const int height, const int search_width, const int search_height, const int n){
+    int vm, vf, vmm, vfm;
+    bool ver_locking, hor_locking;
     for (int vertex : search_range){
         if (sandpile.verticies[vertex] > 3){
             tcount += 1;
             runthru = 1;
             sandpile.odometer[vertex] += 1;
 
-            vm = (vertex % width) % (search_width);
-            vf = (vertex / height) % (search_height);
+            vm = (vertex % width);
+            vf = (vertex / height);
 
-            //TO DO - Change this so that there is a lock for each overlapping axis, not just one for all of them
-            bool locking = (vm == 0 || vm == search_width - 1 || vm == 1 || vm == search_width - 2 ||
-                            vf == 0 || vf == search_height - 1 || vf == 1 || vf == search_height - 2);
-            
-            if (locking) {
-                fuck.lock();
+            if (vf == 0 || vf == height - 1 || vm == 0 || vm == width - 1) {
+                ver_locking = false;
+                hor_locking = false;
+            } else {
+                vmm = vm  % (search_width);
+                vfm = vf  % (search_height);
+                ver_locking = (vmm == 0 || vmm == search_width - 1 || vmm == 1 || vmm == search_width - 2);
+                hor_locking = (vfm == 0 || vfm == search_height - 1 || vfm == 1 || vfm == search_height - 2);
             }
+            
+            if (ver_locking) {
+                vertical_locks[(vmm > 2) + (vm / search_height)].lock();
+            }
+            if (hor_locking) {
+                horizontal_locks[(vfm > 2) + (vf / search_width)].lock();
+            }
+            // 
 
             sandpile.verticies[vertex] -= 4;
             // if ((vertex / size == 0) || (vertex / size == size - 1)) {
@@ -461,12 +471,14 @@ void toppleWorker(matrixSandpile &sandpile, std::vector<int> &search_range, int 
             // };
 
             for (int topples : sandpile.congruence_map[vertex]){
-                //printf("%d, %d\n",topples, vertex);
                 sandpile.verticies[topples] += 1;
             };
 
-            if (locking) {
-                fuck.unlock();
+            if (ver_locking) {
+                vertical_locks[(vmm > 2) + (vm / search_height)].unlock();
+            }
+            if (hor_locking) {
+                horizontal_locks[(vfm > 2) + (vf / search_width)].unlock();
             }
         };
     }
@@ -497,12 +509,11 @@ vector2D generateGridCover(const int covers, const int width, const int height) 
     return cover;
 };
 
-
 matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width, const int height,
                                         const bool pre_topple, const bool debug = false){
     
     
-    const int COVERS = 2;
+    const int COVERS = 3;
     int runthru = 1;
     int lcount = 0;
     int tcount = 0;
@@ -525,12 +536,17 @@ matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width
     std::vector<std::thread> threads;
     vector2D gridCover = generateGridCover(COVERS, width, height);
 
+    std::vector<std::mutex> vertical_locks(std::max(2, COVERS*COVERS));
+    std::vector<std::mutex> horizontal_locks(std::max(2, COVERS*COVERS));
+
+
     while (runthru) {
         lcount += 1;
         runthru = 0;
 
         for (std::vector<int> &q : gridCover) {
             threads.push_back(std::thread(  &toppleWorker, std::ref(sandpile), std::ref(q), std::ref(tcount), std::ref(runthru),
+                                            std::ref(vertical_locks), std::ref(horizontal_locks),
                                             width, height, width / COVERS, height / COVERS, COVERS));
         }
 
@@ -684,14 +700,14 @@ void successiveGen(const int size, const int scaling, const int start){
     std::vector<int> secondOdo;
 
     auto a = generateSquareCongruenceMap(start, start);
-    auto b = generateNeutralElement(a, start, start, false, firstOdo, secondOdo, true);
+    auto b = generateNeutralElement(a, start, start, false, firstOdo, secondOdo, false);
     firstOdo = increaseOdometer(firstOdo, start, scaling);
     secondOdo = increaseOdometer(secondOdo, start, scaling);
 
     for (int i = start + (2*scaling); i < size + 1; i += 2*scaling){
-        printf("Sandpile %d \n", i);
+        //printf("Sandpile %d \n", i);
         a = generateSquareCongruenceMap(i, i);
-        b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, true);
+        b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, false);
 
         firstOdo = increaseOdometer(firstOdo, i, scaling);
         secondOdo = increaseOdometer(secondOdo, i, scaling);
@@ -704,9 +720,9 @@ void normalGen(const int size){
     std::vector<int> secondOdo;
 
     auto a = generateSquareCongruenceMap(size, size);
-    auto b = generateNeutralElement(a, size, size, false, firstOdo, secondOdo, true);
+    auto b = generateNeutralElement(a, size, size, false, firstOdo, secondOdo, false);
 
-    createBMP(unflatten(b, size, size), nColourScheme(4), "../test.bmp");
+    //createBMP(unflatten(b, size, size), nColourScheme(4), "../test.bmp");
 };
 
 void benchmarkTime(int size, int scaling_multiple, int scaling_increase, int start_increase) {
@@ -716,11 +732,13 @@ void benchmarkTime(int size, int scaling_multiple, int scaling_increase, int sta
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
     printf("%lld\n", duration.count());
 
-    clock_start = std::chrono::high_resolution_clock::now();
-    successiveGen(size, scaling_increase, start_increase);
-    clock_stop = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
-    printf("%lld\n", duration.count());
+    for (int i = 1; i < scaling_increase; i++) {
+        clock_start = std::chrono::high_resolution_clock::now();
+        successiveGen(size, i, start_increase);
+        clock_stop = std::chrono::high_resolution_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
+        printf("%lld\n", duration.count());
+    }
 
     clock_start = std::chrono::high_resolution_clock::now();
     normalGen(size);
@@ -755,11 +773,12 @@ void plotOdo() {
 int main(){
     srand(time(NULL));
     
-    auto clock_start = std::chrono::high_resolution_clock::now();
-    normalGen(100);
-    auto clock_stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
-    printf("%lld\n", duration.count());
+    benchmarkTime(100, 2, 100, 2);
+    printf("---------\n");
+    benchmarkTime(200, 2, 100, 100);
+    printf("---------\n");
+    benchmarkTime(300, 2, 200, 100);
+    printf("---------\n");
 
     return 0;
 };
