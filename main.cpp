@@ -704,7 +704,8 @@ void successiveGen(const int size, const int scaling, const int start){
     firstOdo = increaseOdometer(firstOdo, start, scaling);
     secondOdo = increaseOdometer(secondOdo, start, scaling);
 
-    for (int i = start + (2*scaling); i < size + 1; i += 2*scaling){
+    int i = 0;
+    for (i = start + (2*scaling); i < size + 1; i += 2*scaling){
         //printf("Sandpile %d \n", i);
         a = generateSquareCongruenceMap(i, i);
         b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, false);
@@ -712,7 +713,8 @@ void successiveGen(const int size, const int scaling, const int start){
         firstOdo = increaseOdometer(firstOdo, i, scaling);
         secondOdo = increaseOdometer(secondOdo, i, scaling);
     }
-    //createBMP(unflatten(b, size, size), nColourScheme(4), "test.bmp");
+    i -= 2*scaling;
+    //createBMP(unflatten(b, i, i), nColourScheme(4), "test.bmp");
 };
 
 void normalGen(const int size){
@@ -773,7 +775,7 @@ void plotOdo() {
 int main(){
     srand(time(NULL));
     
-    benchmarkTime(100, 2, 100, 2);
+    benchmarkTime(100, 2, 100, 100);
     printf("---------\n");
     benchmarkTime(200, 2, 100, 100);
     printf("---------\n");
