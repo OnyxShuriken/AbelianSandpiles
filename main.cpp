@@ -3,6 +3,7 @@
 #include <vector>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <cstdint>
 #include <chrono>
 #include <string>
@@ -155,6 +156,34 @@ vector2D readBMP(const string &filename, const vector2D colours) {
     return pixels;
 }
 
+void createTXT(const std::vector<int> data, const string filename){
+    std::ofstream outFile(filename, std::ios::binary);
+    for (int a : data) {
+        outFile << a << ",";
+    }
+    outFile.close();
+}
+
+std::vector<int> readTXT(const string filename){
+    std::vector<int> numbers;
+    std::ifstream file(filename);
+    
+    if (!file) {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        return numbers;
+    }
+
+    std::string line, value;
+    while (std::getline(file, line)) { // Read the whole line
+        std::stringstream ss(line);
+        while (std::getline(ss, value, ',')) { // Split by comma
+            numbers.push_back(std::stoi(value)); // Convert to int and store
+        }
+    }
+
+    return numbers;
+}
+
 vector2D nColourScheme(const int colours){
     vector2D scheme;
     for (int level = 1; level < colours+1; level++){
@@ -266,41 +295,41 @@ vector2D generateSquareCongruenceMap(int width, int height) {
     return congruence;
 };
 
-vector2D generateTorusCongruenceMap(int size, int total_size, int offset) {
+vector2D generateTorusCongruenceMap(int width, int height, int offset = 0) {
     vector2D congruence;
     std::vector<int> blank;
 
-    for (int vert = 0; vert < total_size; vert++){
+    for (int vert = 0; vert < width*height; vert++){
         congruence.push_back(blank);
         if (vert == 0) {
             continue;
         }
 
-        int vm = vert % size;
-        int vf = vert / size;
+        int vm = vert % width;
+        int vf = vert / width;
         // End of a row
-        if (vm != size - 1){
+        if (vm != width - 1){
             congruence[vert].push_back(vert+1);
         } else {
-            congruence[vert].push_back(((vf + offset) % size) * size);
+            congruence[vert].push_back(((vf + offset) % height) * width);
         };
         // Start of a row
         if (vm != 0){
-            congruence[vert].push_back(vert-1);
+            congruence[vert].push_back(vert - 1);
         } else {
-            congruence[vert].push_back((vert + size - 1 + (size * offset)) % total_size);
+            congruence[vert].push_back( ((vf + offset) % height) * width + width - 1);
         };
         // Final row
-        if (vf != size - 1){
-            congruence[vert].push_back(vert+size);
+        if (vf != height - 1){
+            congruence[vert].push_back(vert + width);
         } else {
-            congruence[vert].push_back((vm + offset) % size);
+            congruence[vert].push_back((vm + offset) % width);
         };
         // First row
         if (vf != 0){
-            congruence[vert].push_back(vert-size);
+            congruence[vert].push_back(vert - width);
         } else {
-            congruence[vert].push_back(((vm + offset) % size) + size*(size-1));
+            congruence[vert].push_back(((vm + offset) % width) + width*(height-1));
         };
     };
 
@@ -570,7 +599,7 @@ std::vector<int> generateNeutralElement(const vector2D cong_map, const int width
     int total_size = width * height;
 
     // Uncomment for a sink at 0
-    //double_cmax[0] = 0;
+    double_cmax[0] = 0;
 
     if (estimation){
         firstStab = stabaliseMatrixSandpile({double_cmax, cong_map, firstOdo}, width, height, true, debug);
@@ -667,9 +696,9 @@ void generateImage(const int image, const string filepath){
 };
  */
 
-std::vector<int> doublePath(const int size, const int scaling, const bool debug = false){
-    int lowest = size;
-    int temp = size;
+void doublePath(const int width, const int height, const int scaling, const bool debug = false){
+    int lowest = width;
+    int temp = width;
 
     while (temp % scaling == 0) {
         temp = temp / scaling;
@@ -679,82 +708,98 @@ std::vector<int> doublePath(const int size, const int scaling, const bool debug 
     std::vector<int> firstOdo;
     std::vector<int> secondOdo;
 
-    auto a = generateSquareCongruenceMap(lowest, lowest);
+    auto a = generateTorusCongruenceMap(lowest, lowest);
     auto b = generateNeutralElement(a, lowest, lowest, false, firstOdo, secondOdo, debug);
     firstOdo = scaleOdometer(firstOdo, lowest , scaling);
     secondOdo = scaleOdometer(secondOdo, lowest, scaling);
 
-    for (int i = lowest*scaling; i < size + 1; i = i*scaling) {
+    for (int i = lowest*scaling; i < width + 1; i = i*scaling) {
         if (debug) { printf("Generating %d x %d...\n", i, i);}
-        a = generateSquareCongruenceMap(i, i);
+        a = generateTorusCongruenceMap(i, i);
         b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, debug);
         firstOdo = scaleOdometer(firstOdo, i ,scaling);
         secondOdo = scaleOdometer(secondOdo, i,scaling);
     }
     
-    return b;
+    std::string filename1 = "../Torus/"+std::to_string(width)+"x"+std::to_string(height)+"odo1.txt";
+    std::string filename2 = "../Torus/"+std::to_string(width)+"x"+std::to_string(height)+"odo2.txt";
+    
+    createTXT(firstOdo, filename1);
+    createTXT(secondOdo, filename2);
+
+    createBMP(unflatten(b, width, height), nColourScheme(4), "../Torus/"+std::to_string(width)+"x"+std::to_string(height)+".bmp");
 };
 
 void successiveGen(const int size, const int scaling, const int start){
     std::vector<int> firstOdo;
     std::vector<int> secondOdo;
+    vector2D a;
+    std::vector<int> b;
 
-    auto a = generateSquareCongruenceMap(start, start);
-    auto b = generateNeutralElement(a, start, start, false, firstOdo, secondOdo, false);
-    firstOdo = increaseOdometer(firstOdo, start, scaling);
-    secondOdo = increaseOdometer(secondOdo, start, scaling);
+    int leftover = size % (scaling * 2);
 
-    int i = 0;
-    for (i = start + (2*scaling); i < size + 1; i += 2*scaling){
-        //printf("Sandpile %d \n", i);
-        a = generateSquareCongruenceMap(i, i);
-        b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, false);
+    a = generateSquareCongruenceMap(start, start);
+    b = generateNeutralElement(a, start, start, false, firstOdo, secondOdo, false);
 
+    for (int i = start; i < size;){
         firstOdo = increaseOdometer(firstOdo, i, scaling);
         secondOdo = increaseOdometer(secondOdo, i, scaling);
+        i += 2*scaling;
+        a = generateSquareCongruenceMap(i, i);
+        b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, false);
     }
-    i -= 2*scaling;
-    //createBMP(unflatten(b, i, i), nColourScheme(4), "test.bmp");
+
+    firstOdo = increaseOdometer(firstOdo, size - leftover, leftover / 2);
+    secondOdo = increaseOdometer(secondOdo, size - leftover, leftover / 2);
+    a = generateSquareCongruenceMap(size, size);
+    b = generateNeutralElement(a, size, size, true, firstOdo, secondOdo, false);
+    //createBMP(unflatten(b, size, size), nColourScheme(4), "test.bmp");
 };
 
-void normalGen(const int size){
+void normalGen(const int width, const int height){
     std::vector<int> firstOdo;
     std::vector<int> secondOdo;
 
-    auto a = generateSquareCongruenceMap(size, size);
-    auto b = generateNeutralElement(a, size, size, false, firstOdo, secondOdo, false);
+    auto a = generateSquareCongruenceMap(width, height);
+    auto b = generateNeutralElement(a, width, height, false, firstOdo, secondOdo, true);
 
-    //createBMP(unflatten(b, size, size), nColourScheme(4), "../test.bmp");
+
+    std::string filename1 = "../Square/"+std::to_string(width)+"x"+std::to_string(height)+"odo1.txt";
+    std::string filename2 = "../Square/"+std::to_string(width)+"x"+std::to_string(height)+"odo2.txt";
+
+    createTXT(firstOdo, filename1);
+    createTXT(secondOdo, filename2);
+
+    createBMP(unflatten(b, width, height), nColourScheme(4), "../Square/"+std::to_string(width)+"x"+std::to_string(height)+".bmp");
 };
 
 void benchmarkTime(int size, int scaling_multiple, int scaling_increase, int start_increase) {
     auto clock_start = std::chrono::high_resolution_clock::now();
-    doublePath(size, scaling_multiple);
+    doublePath(size, size, scaling_multiple);
     auto clock_stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
     printf("%lld\n", duration.count());
 
-    for (int i = 1; i < scaling_increase; i++) {
-        clock_start = std::chrono::high_resolution_clock::now();
-        successiveGen(size, i, start_increase);
-        clock_stop = std::chrono::high_resolution_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
-        printf("%lld\n", duration.count());
-    }
+    
+    clock_start = std::chrono::high_resolution_clock::now();
+    successiveGen(size, scaling_increase, start_increase);
+    clock_stop = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
+    printf("%lld\n", duration.count());
 
     clock_start = std::chrono::high_resolution_clock::now();
-    normalGen(size);
+    normalGen(size, size);
     clock_stop = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
     printf("%lld\n", duration.count());
 };
 
-void plotOdo() {
+/* void plotOdo() {
     std::vector<int> firstOdo, secondOdo;
     int size = 400;
 
 
-    auto b = doublePath(size, 2, true);
+    auto b = doublePath(size, size, 2, true);
 
     firstOdo = firstOdo + secondOdo;
 
@@ -770,17 +815,29 @@ void plotOdo() {
     createBMP(unflatten(firstOdo, size, size), 
                         nColourScheme(256), std::to_string(size)+"x"+std::to_string(size)+"odo.bmp");
 
-};
+}; */
 
 int main(){
     srand(time(NULL));
+
+    doublePath(100, 100, 2, true);
+
+    /* auto aa = readTXT("../Square/Odometers/200x200odo1.txt");
+    auto bb = readTXT("../Square/Odometers/200x200odo2.txt");
+
+    aa = scaleOdometer(aa, 200, 2);
+    bb = scaleOdometer(bb, 200, 2);
+
+    auto a = generateSquareCongruenceMap(400, 400);
+    auto b = generateNeutralElement(a, 400, 400, true, aa, bb, true);
+
+    createBMP(unflatten(b, 400, 400), nColourScheme(4), "../Square/400x400.bmp");
     
-    benchmarkTime(100, 2, 100, 100);
-    printf("---------\n");
-    benchmarkTime(200, 2, 100, 100);
-    printf("---------\n");
-    benchmarkTime(300, 2, 200, 100);
-    printf("---------\n");
+    std::string filename1 = "../Square/400x400odo1.txt";
+    std::string filename2 = "../Square/400x400odo2.txt";
+
+    createTXT(aa, filename1);
+    createTXT(bb, filename2); */
 
     return 0;
 };
