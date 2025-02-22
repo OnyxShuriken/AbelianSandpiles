@@ -227,13 +227,15 @@ std::vector<int> flatten(const vector2D grid){
     return flattened_grid;
 }
 
-std::vector<int> scaleOdometer(std::vector<int> odometer, int size, int scale) {
-    std::vector<int> scaled((size*scale)*(size*scale), 0);
+std::vector<int> scaleOdometer(std::vector<int> odometer, int width, int height, int scale) {
+    std::vector<int> scaled((width*scale)*(height*scale), 0);
 
-    for (int y = 0; y < size; y++) {
-        for (int x = 0; x < size; x++) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
             for (int s = 0; s < scale; s++) {
-                scaled[(x * scale)+ (y * size * scale) + s] = odometer[(y*size) + x];
+                for (int ss = 0; ss < scale; ss++) {
+                    scaled[(x * scale)+ ((y+ss) * width * scale) + s] = odometer[(y*width) + x];
+                }
             }
         }
     }
@@ -241,13 +243,12 @@ std::vector<int> scaleOdometer(std::vector<int> odometer, int size, int scale) {
     return scaled;
 }
 
-std::vector<int> increaseOdometer(std::vector<int> odometer, int size, int increase) {
-    int new_size = size + (increase*2);
-    std::vector<int> scaled(new_size*new_size, 0);
+std::vector<int> increaseOdometer(std::vector<int> odometer, int width, int height, int increase) {
+    std::vector<int> scaled((width+increase)*(height+increase), 0);
 
-    for (int a = 0; a < (size); a++) {
-        for (int b = 0; b < (size); b++) {
-            scaled[new_size*(a+1) + 2 + b] = odometer[a*(size) + b];
+    for (int a = 0; a < height; a++) {
+        for (int b = 0; b < width; b++) {
+            scaled[(width+increase)*(a+1) + 1 + b] = odometer[a*(width) + b];
         }
     }
 
@@ -307,30 +308,26 @@ vector2D generateTorusCongruenceMap(int width, int height, int offset = 0) {
 
         int vm = vert % width;
         int vf = vert / width;
-        // End of a row
-        if (vm != width - 1){
-            congruence[vert].push_back(vert+1);
+        // Add vertex one to the right
+        congruence[vert].push_back( ((vm + 1) % width) + (vf * width));
+        // Add vertex one to the left
+        if (vm == 0){
+            congruence[vert].push_back( width - 1 + (vf * width));
         } else {
-            congruence[vert].push_back(((vf + offset) % height) * width);
-        };
-        // Start of a row
-        if (vm != 0){
-            congruence[vert].push_back(vert - 1);
+            congruence[vert].push_back( ((vm - 1) % width) + (vf * width));
+        }
+        // Add vertex one down
+        if (vm == 0) {
+            congruence[vert].push_back( (((vf + 1) % height) * width));
         } else {
-            congruence[vert].push_back( ((vf + offset) % height) * width + width - 1);
-        };
-        // Final row
-        if (vf != height - 1){
-            congruence[vert].push_back(vert + width);
+            congruence[vert].push_back( ((vm - offset) % width) + (((vf + 1) % height) * width));
+        }
+        // Add vertex one up
+        if (vf == 0) {
+            congruence[vert].push_back( ((vm + offset) % width) + ((height - 1) * width));
         } else {
-            congruence[vert].push_back((vm + offset) % width);
-        };
-        // First row
-        if (vf != 0){
-            congruence[vert].push_back(vert - width);
-        } else {
-            congruence[vert].push_back(((vm + offset) % width) + width*(height-1));
-        };
+            congruence[vert].push_back( ((vm + offset) % width) + (((vf - 1) % height) * width));
+        }
     };
 
     return congruence;
@@ -461,19 +458,19 @@ vector2D generateMobiusCongruenceMap(int size, int total_size) {
 
 // Big boy stuff
 
-void toppleWorker(matrixSandpile &sandpile, const std::vector<int> &search_range, int &tcount, int &runthru,
-                std::vector<std::mutex> &vertical_locks, std::vector<std::mutex> &horizontal_locks,
-                const int width, const int height, const int search_width, const int search_height, const int n){
+void toppleWorker(  matrixSandpile &sandpile, const std::vector<int> &search_range, int &tcount, int &runthru,
+                    std::vector<std::mutex> &vertical_locks, std::vector<std::mutex> &horizontal_locks,
+                    const int width, const int height, const int search_width, const int search_height, const int n){
     int vm, vf, vmm, vfm;
     bool ver_locking, hor_locking;
+
     for (int vertex : search_range){
         if (sandpile.verticies[vertex] > 3){
             tcount += 1;
             runthru = 1;
-            sandpile.odometer[vertex] += 1;
 
             vm = (vertex % width);
-            vf = (vertex / height);
+            vf = (vertex / width);
 
             if (vf == 0 || vf == height - 1 || vm == 0 || vm == width - 1) {
                 ver_locking = false;
@@ -484,15 +481,18 @@ void toppleWorker(matrixSandpile &sandpile, const std::vector<int> &search_range
                 ver_locking = (vmm == 0 || vmm == search_width - 1 || vmm == 1 || vmm == search_width - 2);
                 hor_locking = (vfm == 0 || vfm == search_height - 1 || vfm == 1 || vfm == search_height - 2);
             }
-            
+
             if (ver_locking) {
-                vertical_locks[(vmm > 2) + (vm / search_height)].lock();
+                //std::cout << "locking " << (vmm > 2) + vm / search_width << '\n';
+                vertical_locks[(vmm > 2) + (vm / search_width)].lock();
             }
             if (hor_locking) {
-                horizontal_locks[(vfm > 2) + (vf / search_width)].lock();
+                //std::cout << "locking " << (vfm > 2) + vf / search_height << '\n';
+                horizontal_locks[(vfm > 2) + (vf / search_height)].lock();
             }
-            // 
-
+            //
+            
+            sandpile.odometer[vertex] += 1;
             sandpile.verticies[vertex] -= 4;
             // if ((vertex / size == 0) || (vertex / size == size - 1)) {
             //    sandpile.verticies[vertex] -= 3;
@@ -503,11 +503,14 @@ void toppleWorker(matrixSandpile &sandpile, const std::vector<int> &search_range
                 sandpile.verticies[topples] += 1;
             };
 
-            if (ver_locking) {
-                vertical_locks[(vmm > 2) + (vm / search_height)].unlock();
-            }
             if (hor_locking) {
-                horizontal_locks[(vfm > 2) + (vf / search_width)].unlock();
+                //std::cout << "unlocking " << (vfm > 2) + vf / search_height << '\n';
+                horizontal_locks[(vfm > 2) + (vf / search_height)].unlock();
+            }
+
+            if (ver_locking) {
+                //std::cout << "unlocking " << (vmm > 2) + vm / search_width << '\n';
+                vertical_locks[(vmm > 2) + (vm / search_width)].unlock();
             }
         };
     }
@@ -542,7 +545,7 @@ matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width
                                         const bool pre_topple, const bool debug = false){
     
     
-    const int COVERS = 3;
+    const int COVERS = 1;
     int runthru = 1;
     int lcount = 0;
     int tcount = 0;
@@ -568,7 +571,6 @@ matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width
     std::vector<std::mutex> vertical_locks(std::max(2, COVERS*COVERS));
     std::vector<std::mutex> horizontal_locks(std::max(2, COVERS*COVERS));
 
-
     while (runthru) {
         lcount += 1;
         runthru = 0;
@@ -585,7 +587,6 @@ matrixSandpile stabaliseMatrixSandpile( matrixSandpile sandpile, const int width
 
         threads.clear();
     }
-
     if (debug) {printf("Done! Sandpile stabalizsed. %d loops perforemd with %d topples.\n", lcount, tcount);}
     return sandpile;
 };
@@ -615,184 +616,80 @@ std::vector<int> generateNeutralElement(const vector2D cong_map, const int width
     return secondStab.verticies;
 };
 
-void generateImage(const int image, const string filepath){
-    int total_size;
+void gen(const int width, const int height, const int starting_width = 0, const int starting_height = 0, const bool debug = false) {
+    int target_width, target_height;
+    int SCALING = 2;
     std::vector<int> firstOdo;
     std::vector<int> secondOdo;
-
-    generateNeutralElement(generateSquareCongruenceMap(2, 4), 2, 4, false, firstOdo, secondOdo);
-
-    /* for (int image = start; image < images; image += 2){
-        printf("Generating %d x %d grid...\n", image, image);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        total_size = image*image;
-        printf("Generating congruence map... \n");
-        auto b = generateSquareCongruenceMap(image, total_size);
-        //a = vector2D();
-        printf("Calculating neutral element... \n");
-        auto c = generateNeutralElement(b, image, total_size, true, firstOdo, secondOdo);
-        createBMP(unflatten(c, image, total_size), nColourScheme(4), filepath+std::to_string(image)+"x"+std::to_string(image)+".bmp");
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        printf("Time taken by function: %lld microseconds.\n", duration.count());
-    } */
-};
-
-/* void generateImageRange(const int images, const string filepath, const int start){
-    int total_size;
-    std::vector<int> firstOdo;
-    std::vector<int> secondOdo;
-
-    for (int image = start; image < images; image++){
-        printf("Generating %d x %d image...\n", image, image);
-        auto clock_start = std::chrono::high_resolution_clock::now();
-        total_size = image*image;
-
-        printf("Generating congruence map... \n");
-        auto b = generateSquareCongruenceMap(image, total_size);
-
-        printf("Calculating neutral element... \n");
-        auto c = generateNeutralElement(b, image, total_size, (image==start), firstOdo, secondOdo);
-
-        printf("Creating BMP...");
-        createBMP(unflatten(c, image, total_size), nColourScheme(4), filepath+std::to_string(image)+"x"+std::to_string(image)+".bmp");
-        
-        firstOdo = increaseOdometer(firstOdo, 1);
-        secondOdo = increaseOdometer(secondOdo, 1);
-
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - clock_start);
-        printf("Time taken by function: %lld microseconds.\n", duration.count());
-    }
-}; */
-
-/* void generateHyperImages(int images, string filepath, int start = 1){
-    int total_size;
-    for (int image = start; image < images; image ++){
-        printf("Generating %d x %d grid...\n", image, image);
-
-        auto start = std::chrono::high_resolution_clock::now();
-        total_size = pow(2, image) - 1;
-        printf("Generating congruence map... \n");
-        auto b = generateBinaryHyperbolicMap(image);
-        printf("Calculating neutral element... \n");
-        auto c = generateNeutralElement(b, image, total_size);
-
-
-        std::ofstream output(filepath+std::to_string(image)+".txt");
-        for (int i=0; i < total_size; i++){
-            output << c[i];
-            if (i != total_size - 1) {
-                output << ",";
-            }
-        }
-
-
-        auto stop = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-        printf("Time taken by function: %lld microseconds.\n", duration.count());
-    }
-};
- */
-
-void doublePath(const int width, const int height, const int scaling, const bool debug = false){
-    int lowest = width;
-    int temp = width;
-
-    while (temp % scaling == 0) {
-        temp = temp / scaling;
-        lowest = temp;
-    }
-
-    std::vector<int> firstOdo;
-    std::vector<int> secondOdo;
-
-    auto a = generateTorusCongruenceMap(lowest, lowest);
-    auto b = generateNeutralElement(a, lowest, lowest, false, firstOdo, secondOdo, debug);
-    firstOdo = scaleOdometer(firstOdo, lowest , scaling);
-    secondOdo = scaleOdometer(secondOdo, lowest, scaling);
-
-    for (int i = lowest*scaling; i < width + 1; i = i*scaling) {
-        if (debug) { printf("Generating %d x %d...\n", i, i);}
-        a = generateTorusCongruenceMap(i, i);
-        b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, debug);
-        firstOdo = scaleOdometer(firstOdo, i ,scaling);
-        secondOdo = scaleOdometer(secondOdo, i,scaling);
-    }
-    
-    std::string filename1 = "../Torus/"+std::to_string(width)+"x"+std::to_string(height)+"odo1.txt";
-    std::string filename2 = "../Torus/"+std::to_string(width)+"x"+std::to_string(height)+"odo2.txt";
-    
-    createTXT(firstOdo, filename1);
-    createTXT(secondOdo, filename2);
-
-    createBMP(unflatten(b, width, height), nColourScheme(4), "../Torus/"+std::to_string(width)+"x"+std::to_string(height)+".bmp");
-};
-
-void successiveGen(const int size, const int scaling, const int start){
-    std::vector<int> firstOdo;
-    std::vector<int> secondOdo;
-    vector2D a;
     std::vector<int> b;
+    vector2D a;
 
-    int leftover = size % (scaling * 2);
 
-    a = generateSquareCongruenceMap(start, start);
-    b = generateNeutralElement(a, start, start, false, firstOdo, secondOdo, false);
-
-    for (int i = start; i < size;){
-        firstOdo = increaseOdometer(firstOdo, i, scaling);
-        secondOdo = increaseOdometer(secondOdo, i, scaling);
-        i += 2*scaling;
-        a = generateSquareCongruenceMap(i, i);
-        b = generateNeutralElement(a, i, i, true, firstOdo, secondOdo, false);
+    if (width == 1 || height == 1) {
+        a = generateTorusCongruenceMap(width, height);
+        b = generateNeutralElement(a, width, height, false, firstOdo, secondOdo, debug);
+        createBMP(unflatten(b, width, height), nColourScheme(4), "../TorusOffset/"+std::to_string(width)+"x"+std::to_string(height)+".bmp");
+        return;
     }
 
-    firstOdo = increaseOdometer(firstOdo, size - leftover, leftover / 2);
-    secondOdo = increaseOdometer(secondOdo, size - leftover, leftover / 2);
-    a = generateSquareCongruenceMap(size, size);
-    b = generateNeutralElement(a, size, size, true, firstOdo, secondOdo, false);
-    //createBMP(unflatten(b, size, size), nColourScheme(4), "test.bmp");
-};
+    if (width % 2 == 1) {
+        target_width = width - 1;
+    } else {
+        target_width = width;
+    }
+    if (height % 2 == 1) {
+        target_height = height - 1;
+    } else {
+        target_height = height;
+    }
 
-void normalGen(const int width, const int height){
-    std::vector<int> firstOdo;
-    std::vector<int> secondOdo;
+    int lowest_width = target_width;
+    int t_width = lowest_width;
+    int lowest_height = target_height;
+    int t_height = lowest_height;
 
-    auto a = generateSquareCongruenceMap(width, height);
-    auto b = generateNeutralElement(a, width, height, false, firstOdo, secondOdo, true);
+    while (t_width % SCALING == 0 && t_height % SCALING == 0) {
+        t_width = t_width / SCALING;
+        t_height = t_height / SCALING;
+        if ( t_width >= starting_width && t_height >= starting_height) {
+            lowest_width = t_width;
+            lowest_height = t_height;
+        }
+    }
 
+    if (starting_height) {
+        firstOdo = readTXT("../TorusOffset/Odometers/"+std::to_string(starting_width)+"x"+std::to_string(starting_height)+"odo1.txt");
+        secondOdo = readTXT("../TorusOffset/Odometers/"+std::to_string(starting_width)+"x"+std::to_string(starting_width)+"odo2.txt");
+    } else {
+        auto a = generateTorusCongruenceMap(lowest_width, lowest_height, 0);
+        auto b = generateNeutralElement(a, lowest_width, lowest_height, false, firstOdo, secondOdo, debug);
+    }
 
-    std::string filename1 = "../Square/"+std::to_string(width)+"x"+std::to_string(height)+"odo1.txt";
-    std::string filename2 = "../Square/"+std::to_string(width)+"x"+std::to_string(height)+"odo2.txt";
+    for (int i = SCALING; i*lowest_width <= target_width; i = i*SCALING) {
+        if (debug) { printf("\nGenerating %d x %d...\n", lowest_width * i, lowest_height * i);}
+        firstOdo = scaleOdometer(firstOdo, lowest_width * (i/2), lowest_height * (i/2), SCALING);
+        secondOdo = scaleOdometer(secondOdo, lowest_width * (i/2), lowest_height * (i/2), SCALING);
+        a = generateTorusCongruenceMap(lowest_width * i, lowest_height * i, 0);
+        b = generateNeutralElement(a, lowest_width * i, lowest_height * i, true, firstOdo, secondOdo, debug);
+    }
 
+    if (target_height != height || target_width != width){
+        if (debug) { printf("\nGenerating %d x %d...\n", width, height);}
+        a = generateTorusCongruenceMap(width, height, 0);
+        firstOdo = increaseOdometer(firstOdo, target_width, target_height, 1);
+        secondOdo = increaseOdometer(secondOdo, target_width, target_height, 1);
+        b = generateNeutralElement( a, width, height, true, firstOdo, secondOdo, debug);
+    }
+
+    std::string filename1 = "../TorusOffset/Odometers/"+std::to_string(width)+"x"+std::to_string(height)+"odo1.txt";
+    std::string filename2 = "../TorusOffset/Odometers/"+std::to_string(width)+"x"+std::to_string(height)+"odo2.txt";
+                                
     createTXT(firstOdo, filename1);
     createTXT(secondOdo, filename2);
+                            
+    createBMP(unflatten(b, width, height), nColourScheme(4), "../TorusOffset/"+std::to_string(width)+"x"+std::to_string(height)+".bmp");
 
-    createBMP(unflatten(b, width, height), nColourScheme(4), "../Square/"+std::to_string(width)+"x"+std::to_string(height)+".bmp");
-};
-
-void benchmarkTime(int size, int scaling_multiple, int scaling_increase, int start_increase) {
-    auto clock_start = std::chrono::high_resolution_clock::now();
-    doublePath(size, size, scaling_multiple);
-    auto clock_stop = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
-    printf("%lld\n", duration.count());
-
-    
-    clock_start = std::chrono::high_resolution_clock::now();
-    successiveGen(size, scaling_increase, start_increase);
-    clock_stop = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
-    printf("%lld\n", duration.count());
-
-    clock_start = std::chrono::high_resolution_clock::now();
-    normalGen(size, size);
-    clock_stop = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(clock_stop - clock_start);
-    printf("%lld\n", duration.count());
-};
+}
 
 /* void plotOdo() {
     std::vector<int> firstOdo, secondOdo;
@@ -819,25 +716,6 @@ void benchmarkTime(int size, int scaling_multiple, int scaling_increase, int sta
 
 int main(){
     srand(time(NULL));
-
-    doublePath(100, 100, 2, true);
-
-    /* auto aa = readTXT("../Square/Odometers/200x200odo1.txt");
-    auto bb = readTXT("../Square/Odometers/200x200odo2.txt");
-
-    aa = scaleOdometer(aa, 200, 2);
-    bb = scaleOdometer(bb, 200, 2);
-
-    auto a = generateSquareCongruenceMap(400, 400);
-    auto b = generateNeutralElement(a, 400, 400, true, aa, bb, true);
-
-    createBMP(unflatten(b, 400, 400), nColourScheme(4), "../Square/400x400.bmp");
-    
-    std::string filename1 = "../Square/400x400odo1.txt";
-    std::string filename2 = "../Square/400x400odo2.txt";
-
-    createTXT(aa, filename1);
-    createTXT(bb, filename2); */
 
     return 0;
 };
